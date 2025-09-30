@@ -1,4 +1,4 @@
-const CACHE_NAME = "app-cache-v5";  // هر تغییر مهم → شماره ورژن را افزایش بده
+const CACHE_NAME = "app-cache-v6";  // هر تغییر مهم → شماره ورژن را افزایش بده
 
 const FILES_TO_CACHE = [
   "index.html",
@@ -33,4 +33,5 @@ self.addEventListener("fetch", event => {
     })
   );
 });
+
 
