@@ -1,4 +1,4 @@
-const CACHE_NAME = "app-cache-v6";  // هر تغییر مهم → شماره ورژن را افزایش بده
+const CACHE_NAME = "app-cache-v-networkFirst";  
 
 const FILES_TO_CACHE = [
   "index.html",
@@ -8,6 +8,7 @@ const FILES_TO_CACHE = [
   "icons/icon-512.png"
 ];
 
+// نصب: یکسری فایل پایه کش میشه
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
@@ -17,6 +18,7 @@ self.addEventListener("install", event => {
   self.skipWaiting();
 });
 
+// فعال‌سازی: کش‌های قدیمی پاک میشن
 self.addEventListener("activate", event => {
   event.waitUntil(
     caches.keys().then(keys =>
@@ -26,12 +28,17 @@ self.addEventListener("activate", event => {
   self.clients.claim();
 });
 
+// استراتژی "Network First": 
+// سعی کن همیشه از اینترنت بگیری، اگه نشد از کش
 self.addEventListener("fetch", event => {
   event.respondWith(
-    caches.match(event.request).then(response => {
-      return response || fetch(event.request);
-    })
+    fetch(event.request)
+      .then(response => {
+        // نسخه جدید فایل → می‌ریزیم تو کش
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(event.request, clone));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
-
-
