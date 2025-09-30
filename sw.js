@@ -1,5 +1,4 @@
-// ورژن کش را هر بار که فایل‌ها تغییر می‌کنند، تغییر بده
-const CACHE_NAME = "app-cache-v3";  
+const CACHE_NAME = "app-cache-v4";  // هر تغییر مهم → شماره ورژن را افزایش بده
 
 const FILES_TO_CACHE = [
   "index.html",
@@ -9,29 +8,24 @@ const FILES_TO_CACHE = [
   "icons/icon-512.png"
 ];
 
-// نصب سرویس ورکر و کش کردن فایل‌ها
 self.addEventListener("install", event => {
   event.waitUntil(
     caches.open(CACHE_NAME).then(cache => {
       return cache.addAll(FILES_TO_CACHE);
     })
   );
-  self.skipWaiting(); // اجازه بده سریع فعال بشه
+  self.skipWaiting();
 });
 
-// فعال‌سازی و پاک کردن کش قدیمی
 self.addEventListener("activate", event => {
   event.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(
-        keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))
-      )
+      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
     )
   );
-  self.clients.claim(); // بلافاصله کنترل تب‌های باز رو بگیره
+  self.clients.claim();
 });
 
-// گرفتن ریکوئست‌ها
 self.addEventListener("fetch", event => {
   event.respondWith(
     caches.match(event.request).then(response => {
