@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>گالری محصولات</title>
+  <title>گالری محصولات (IndexedDB)</title>
   <link rel="manifest" href="manifest.json">
   <meta name="theme-color" content="#4CAF50">
   <style>
@@ -40,7 +40,7 @@
 </head>
 <body>
   <header>
-    <div>📦 گالری محصولات</div>
+    <div>📦 گالری محصولات (IndexedDB)</div>
     <div class="menu-icon" onclick="toggleMenu()">☰</div>
   </header>
   <div class="overlay" id="overlay" onclick="toggleMenu(true)"></div>
@@ -65,21 +65,192 @@
   </div>
   <div class="gallery" id="gallery"></div>
   <script>
-    const sideMenu = document.getElementById("sideMenu");
-    const overlay = document.getElementById("overlay");
-    const gallery = document.getElementById("gallery");
+    // --- IndexedDB Functions ---
+    let db;
+    const DB_NAME = "ProductGalleryDB";
+    const STORE_NAME = "products";
     let uploadedImageData = null;
-    let editingIndex = null;
+    let editingId = null;
     const MASTER_PASSWORD = "3818542";
-    function toggleMenu(forceClose = false) {
-      if (forceClose) {
-        sideMenu.classList.remove("active");
-        overlay.classList.remove("active");
-      } else {
-        sideMenu.classList.toggle("active");
-        overlay.classList.toggle("active");
-      }
+
+    // Open/Upgrade IndexedDB
+    function openDB(callback) {
+      const request = window.indexedDB.open(DB_NAME, 1);
+      request.onupgradeneeded = function(e) {
+        db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+          db.createObjectStore(STORE_NAME, { keyPath: "id", autoIncrement: true });
+        }
+      };
+      request.onsuccess = function(e) {
+        db = e.target.result;
+        if (callback) callback();
+      };
+      request.onerror = function() { alert("خطا در دسترسی به دیتابیس!"); };
     }
+
+    // Add Product
+    function addProduct() {
+      const name = document.getElementById("productName").value.trim();
+      const desc = document.getElementById("productDesc").value.trim();
+      const price = document.getElementById("productPrice").value.trim();
+      const count = document.getElementById("productCount").value.trim();
+      const image = uploadedImageData || "";
+      if (!name || !price) { alert("نام و قیمت محصول الزامی است ❗"); return; }
+      openDB(() => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
+        if (editingId !== null) {
+          store.get(editingId).onsuccess = function(e) {
+            const data = e.target.result;
+            data.name = name;
+            data.desc = desc;
+            data.price = price;
+            data.count = count;
+            data.image = image || data.image;
+            store.put(data);
+            editingId = null;
+            document.getElementById("saveButton").innerText = "افزودن به گالری";
+            document.getElementById("formTitle").innerText = "➕ افزودن محصول جدید";
+            tx.oncomplete = function() { renderProducts(); clearForm(); toggleMenu(true); };
+          };
+        } else {
+          store.add({ name, desc, price, count, image });
+          tx.oncomplete = function() { renderProducts(); clearForm(); toggleMenu(true); };
+        }
+      });
+    }
+
+    // Render Products
+    function renderProducts() {
+      gallery.innerHTML = "";
+      openDB(() => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.openCursor();
+        req.onsuccess = function(e) {
+          const cursor = e.target.result;
+          if (cursor) {
+            const p = cursor.value;
+            const product = document.createElement("div");
+            product.classList.add("product");
+            product.innerHTML = `
+              <img src="${p.image || "https://via.placeholder.com/400"}" alt="${p.name}">
+              <div class="info">
+                <h3>${p.name}</h3>
+                <p>${p.desc || "بدون توضیحات"}</p>
+                <div class="price">قیمت: ${p.price} تومان</div>
+                <p>تعداد در بسته: ${p.count || "-"}</p>
+              </div>
+              <div class="actions">
+                <button class="edit" onclick="editProduct(${p.id})">ویرایش</button>
+                <button class="delete" onclick="deleteProduct(${p.id})">حذف</button>
+              </div>`;
+            gallery.appendChild(product);
+            cursor.continue();
+          }
+        };
+      });
+    }
+
+    // Edit Product
+    function editProduct(id) {
+      openDB(() => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const store = tx.objectStore(STORE_NAME);
+        store.get(id).onsuccess = function(e) {
+          const p = e.target.result;
+          document.getElementById("productName").value = p.name;
+          document.getElementById("productDesc").value = p.desc;
+          document.getElementById("productPrice").value = p.price;
+          document.getElementById("productCount").value = p.count;
+          uploadedImageData = p.image;
+          if (p.image) { document.getElementById("imagePreview").innerHTML = `<img src="${p.image}" alt="preview">`; }
+          editingId = id;
+          document.getElementById("saveButton").innerText = "ذخیره تغییرات";
+          document.getElementById("formTitle").innerText = "✏️ ویرایش محصول";
+          sideMenu.classList.add("active"); overlay.classList.add("active");
+        };
+      });
+    }
+
+    // Delete Product
+    function deleteProduct(id) {
+      if (!confirm("حذف این محصول؟")) return;
+      openDB(() => {
+        const tx = db.transaction(STORE_NAME, "readwrite");
+        const store = tx.objectStore(STORE_NAME);
+        store.delete(id);
+        tx.oncomplete = function() { renderProducts(); };
+      });
+    }
+
+    // Delete All Products
+    function deleteAllProducts() {
+      const pass = prompt("برای پاک کردن تمام محصولات، رمز را وارد کنید:");
+      if (pass === null) return;
+      if (pass === MASTER_PASSWORD) {
+        openDB(() => {
+          const tx = db.transaction(STORE_NAME, "readwrite");
+          const store = tx.objectStore(STORE_NAME);
+          store.clear();
+          tx.oncomplete = function() { renderProducts(); alert("✅ همه محصولات پاک شدند"); };
+        });
+      } else { alert("❌ رمز اشتباه است!"); }
+    }
+
+    // Export Data (Backup)
+    function exportData() {
+      openDB(() => {
+        const tx = db.transaction(STORE_NAME, "readonly");
+        const store = tx.objectStore(STORE_NAME);
+        const products = [];
+        store.openCursor().onsuccess = function(e) {
+          const cursor = e.target.result;
+          if (cursor) {
+            products.push(cursor.value);
+            cursor.continue();
+          } else {
+            const blob = new Blob([JSON.stringify(products)], { type: "application/json" });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url; a.download = "products_backup.json"; a.click();
+          }
+        };
+      });
+    }
+
+    // Import Data (Restore Backup)
+    function importData() { document.getElementById("importFile").click(); }
+    function handleImport(event) {
+      const file = event.target.files[0]; if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const products = JSON.parse(e.target.result);
+          openDB(() => {
+            const tx = db.transaction(STORE_NAME, "readwrite");
+            const store = tx.objectStore(STORE_NAME);
+            store.clear();
+            products.forEach(product => { store.add(product); });
+            tx.oncomplete = function() { renderProducts(); alert("✅ بک‌آپ با موفقیت بازگردانی شد"); };
+          });
+        } catch { alert("❌ فایل بک‌آپ معتبر نیست!"); }
+      };
+      reader.readAsText(file);
+    }
+
+    // Preview Image
+    function previewImage(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      resizeImage(file, 800, 800, (resizedData) => {
+        uploadedImageData = resizedData;
+        document.getElementById("imagePreview").innerHTML = `<img src="${uploadedImageData}" alt="preview">`;
+      });
+    }
+
+    // Resize Image
     function resizeImage(file, maxWidth = 800, maxHeight = 800, callback) {
       const reader = new FileReader();
       reader.onload = function(e) {
@@ -100,91 +271,8 @@
       };
       reader.readAsDataURL(file);
     }
-    function previewImage(event) {
-      const file = event.target.files[0];
-      if (!file) return;
-      resizeImage(file, 800, 800, (resizedData) => {
-        uploadedImageData = resizedData;
-        document.getElementById("imagePreview").innerHTML = `<img src="${uploadedImageData}" alt="preview">`;
-      });
-    }
-    function addProduct() {
-      const name = document.getElementById("productName").value.trim();
-      const desc = document.getElementById("productDesc").value.trim();
-      const price = document.getElementById("productPrice").value.trim();
-      const count = document.getElementById("productCount").value.trim();
-      const image = uploadedImageData || "";
-      if (!name || !price) { alert("نام و قیمت محصول الزامی است ❗"); return; }
-      let products = JSON.parse(localStorage.getItem("products") || "[]");
-      if (editingIndex !== null) {
-        products[editingIndex] = { name, desc, price, count, image: image || products[editingIndex].image };
-        editingIndex = null;
-        document.getElementById("saveButton").innerText = "افزودن به گالری";
-        document.getElementById("formTitle").innerText = "➕ افزودن محصول جدید";
-      } else {
-        products.push({ name, desc, price, count, image });
-      }
-      try {
-        localStorage.setItem("products", JSON.stringify(products));
-      } catch (e) {
-        alert("❌ ظرفیت حافظه مرورگر پر شده است! لطفاً تعدادی محصول را حذف کنید.");
-        products.pop();
-      }
-      renderProducts();
-      clearForm();
-      toggleMenu(true);
-    }
-    function editProduct(index) {
-      let products = JSON.parse(localStorage.getItem("products") || "[]");
-      const p = products[index];
-      document.getElementById("productName").value = p.name;
-      document.getElementById("productDesc").value = p.desc;
-      document.getElementById("productPrice").value = p.price;
-      document.getElementById("productCount").value = p.count;
-      uploadedImageData = p.image;
-      if (p.image) { document.getElementById("imagePreview").innerHTML = `<img src="${p.image}" alt="preview">`; }
-      editingIndex = index;
-      document.getElementById("saveButton").innerText = "ذخیره تغییرات";
-      document.getElementById("formTitle").innerText = "✏️ ویرایش محصول";
-      sideMenu.classList.add("active"); overlay.classList.add("active");
-    }
-    function deleteProduct(index) {
-      if (!confirm("حذف این محصول؟")) return;
-      let products = JSON.parse(localStorage.getItem("products") || "[]");
-      products.splice(index, 1);
-      localStorage.setItem("products", JSON.stringify(products));
-      renderProducts();
-    }
-    function deleteAllProducts() {
-      const pass = prompt("برای پاک کردن تمام محصولات، رمز را وارد کنید:");
-      if (pass === null) return;
-      if (pass === MASTER_PASSWORD) {
-        localStorage.removeItem("products");
-        renderProducts();
-        alert("✅ همه محصولات پاک شدند");
-      } else { alert("❌ رمز اشتباه است!"); }
-    }
-    function exportData() {
-      let products = JSON.parse(localStorage.getItem("products") || "[]");
-      const blob = new Blob([JSON.stringify(products)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = "products_backup.json"; a.click();
-    }
-    function importData() { document.getElementById("importFile").click(); }
-    function handleImport(event) {
-      const file = event.target.files[0]; if (!file) return;
-      const reader = new FileReader();
-      reader.onload = function(e) {
-        try {
-          const products = JSON.parse(e.target.result);
-          localStorage.setItem("products", JSON.stringify(products));
-          renderProducts();
-          alert("✅ بک‌آپ با موفقیت بازگردانی شد");
-        } catch { alert("❌ فایل بک‌آپ معتبر نیست!"); }
-      };
-      reader.readAsText(file);
-    }
+
+    // Clear Form
     function clearForm() {
       document.getElementById("productName").value = "";
       document.getElementById("productDesc").value = "";
@@ -194,28 +282,26 @@
       document.getElementById("imagePreview").innerHTML = "";
       uploadedImageData = null;
     }
-    function renderProducts() {
-      gallery.innerHTML = "";
-      let products = JSON.parse(localStorage.getItem("products") || "[]");
-      products.forEach((p, i) => {
-        const product = document.createElement("div");
-        product.classList.add("product");
-        product.innerHTML = `
-          <img src="${p.image || "https://via.placeholder.com/400"}" alt="${p.name}">
-          <div class="info">
-            <h3>${p.name}</h3>
-            <p>${p.desc || "بدون توضیحات"}</p>
-            <div class="price">قیمت: ${p.price} تومان</div>
-            <p>تعداد در بسته: ${p.count || "-"}</p>
-          </div>
-          <div class="actions">
-            <button class="edit" onclick="editProduct(${i})">ویرایش</button>
-            <button class="delete" onclick="deleteProduct(${i})">حذف</button>
-          </div>`;
-        gallery.appendChild(product);
-      });
+
+    // Menu
+    const sideMenu = document.getElementById("sideMenu");
+    const overlay = document.getElementById("overlay");
+    function toggleMenu(forceClose = false) {
+      if (forceClose) {
+        sideMenu.classList.remove("active");
+        overlay.classList.remove("active");
+      } else {
+        sideMenu.classList.toggle("active");
+        overlay.classList.toggle("active");
+      }
     }
-    window.onload = renderProducts;
+
+    // Onload
+    window.onload = function() {
+      openDB(renderProducts);
+    };
+
+    // PWA Service Worker
     if ("serviceWorker" in navigator) {
       navigator.serviceWorker.register("sw.js")
         .then(() => console.log("✅ Service Worker Registered"))
